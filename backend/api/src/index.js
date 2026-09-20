@@ -133,6 +133,7 @@ import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 import zkpRoutes from './routes/zkp.routes.js'
 import crossDockRoutes from './routes/crossDockRoutes.js'
 import disputeResolutionRoutes from './routes/dispute_resolution.routes.js'
+import mlInternalRoutes from './routes/ml_internal.routes.js'
 
 
 // ============================================================================
@@ -619,6 +620,7 @@ app.use('/api/blockchain', (req, _res, next) => {
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 app.use('/api', disputeResolutionRoutes)
+app.use('/api', mlInternalRoutes)
 
 // 🆕 Oracle Health Check Endpoint
 app.get('/api/oracle/health', (req, res) => {
