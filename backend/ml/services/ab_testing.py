@@ -105,11 +105,17 @@ class ABTestModel:
 
             results = {}
             logged_versions = df['model_version'].unique()
-            shadow_version = next(
-                (v for v in logged_versions if v != 'production'),
+            test_state = self._test_states.get(test_id, {})
+            prod_version = test_state.get('production_version') or self.get_production_version()
+            shadow_version = test_state.get('shadow_version') or next(
+                (v for v in logged_versions if v not in {prod_version, 'production'}),
                 'shadow'
             )
-            prod_version = 'production'
+
+            # Keep evaluating legacy tests whose metrics used the old literal
+            # production label, while new tests compare real generations.
+            if prod_version not in logged_versions and 'production' in logged_versions:
+                prod_version = 'production'
 
             for metric in df['metric_name'].unique():
                 metric_df = df[df['metric_name'] == metric]
@@ -132,12 +138,17 @@ class ABTestModel:
                 }
 
             is_better = self.is_shadow_better(results)
+            has_comparison = any(
+                values.get('production') is not None and values.get('shadow') is not None
+                for values in results.values()
+            )
 
             return {
                 'test_id': test_id,
                 'results': results,
                 'shadow_better': is_better,
-                'should_rollback': not is_better,
+                'should_rollback': has_comparison and not is_better,
+                'has_comparison': has_comparison,
                 'timestamp': datetime.utcnow().isoformat()
             }
         finally:
@@ -230,6 +241,14 @@ class ABTestModel:
     def trigger_rollback(self, test_id: str) -> Dict[str, Any]:
         """Auto-rollback to previous version if shadow model underperforms"""
         evaluation = self.evaluate_test(test_id)
+
+        if not evaluation.get('has_comparison', False):
+            return {
+                'action': 'insufficient_metrics',
+                'test_id': test_id,
+                'reason': 'Production and shadow metrics are not comparable',
+                'timestamp': datetime.utcnow().isoformat()
+            }
 
         if evaluation.get('should_rollback', False):
             restored = restore_previous_model(DEMAND_MODEL_NAME)

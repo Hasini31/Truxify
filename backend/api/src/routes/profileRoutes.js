@@ -861,7 +861,8 @@ export default router;
 
 // Resolves #2046: DELETE /admin/cache/:userId endpoint
 
-const express = require('express');
+/*
+
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const authMiddleware = require('../middleware/authMiddleware');
@@ -975,3 +976,4 @@ router.get('/', authMiddleware, getProfile);
 router.put('/', authMiddleware, validateProfileUpdate, updateProfile);
 
 module.exports = router;
+*/
