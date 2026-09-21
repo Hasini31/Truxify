@@ -121,14 +121,62 @@ router.get('/orders/check-otp', requireApiKey, async (req, res) => {
 });
 
 /**
- * GET /api/internal/dispute-evidence/:bookingId
+ * POST /api/webhooks/n8n/dispute-trigger
+ * Webhook triggered by n8n or backend timer when delivery remains unconfirmed for 2 hours.
+ */
+router.post('/webhooks/n8n/dispute-trigger', requireApiKey, async (req, res) => {
+  try {
+    const rawId = req.body.orderId || req.body.bookingId;
+    const cleanId = sanitizeBookingId(rawId);
+    if (!cleanId) {
+      return res.status(400).json({ error: 'Invalid or missing orderId / bookingId' });
+    }
+
+    const order = await findOrderByAnyBookingId(cleanId);
+    if (!order) {
+      return res.status(404).json({ error: `Order not found for ${cleanId}` });
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data: updated, error } = await supabaseAdmin
+      .from('orders')
+      .update({ dispute_n8n_triggered_at: nowIso, updated_at: nowIso })
+      .eq('id', order.id)
+      .is('dispute_n8n_triggered_at', null)
+      .select('id, dispute_n8n_triggered_at');
+
+    if (error) {
+      logger.error(`[DisputeRoutes] Webhook dispute-trigger update failed: ${error.message}`);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!updated || updated.length === 0) {
+      return res.status(200).json({ alreadyTriggered: true, orderId: order.id });
+    }
+
+    logger.info(`[DisputeRoutes] Webhook dispute-trigger initiated for order ${order.id}`);
+    return res.status(200).json({
+      success: true,
+      alreadyTriggered: false,
+      orderId: order.id,
+      triggeredAt: nowIso,
+    });
+  } catch (err) {
+    logger.error(`[DisputeRoutes] Error in webhook dispute-trigger: ${err.message}`);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/internal/dispute-evidence/:bookingId or /:orderId
  * Collects GPS trail & OTP evidence for n8n decision node.
  */
-router.get('/internal/dispute-evidence/:bookingId', requireApiKey, async (req, res) => {
+async function getDisputeEvidenceHandler(req, res) {
   try {
-    const cleanId = sanitizeBookingId(req.params.bookingId);
+    const rawId = req.params.orderId || req.params.bookingId;
+    const cleanId = sanitizeBookingId(rawId);
     if (!cleanId) {
-      return res.status(400).json({ error: 'Invalid bookingId parameter' });
+      return res.status(400).json({ error: 'Invalid orderId or bookingId parameter' });
     }
 
     const order = await findOrderByAnyBookingId(cleanId);
@@ -160,7 +208,11 @@ router.get('/internal/dispute-evidence/:bookingId', requireApiKey, async (req, r
     logger.error(`[DisputeRoutes] Error collecting evidence: ${err.message}`);
     return res.status(500).json({ error: err.message });
   }
-});
+}
+
+router.get('/internal/dispute-evidence/:bookingId', requireApiKey, getDisputeEvidenceHandler);
+router.get('/internal/dispute-evidence/:orderId', requireApiKey, getDisputeEvidenceHandler);
+
 
 /**
  * POST /api/escrow/release

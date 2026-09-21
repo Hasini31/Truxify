@@ -1,5 +1,5 @@
 import express from 'express';
-import { redisClient } from '../config/db.js';
+import { redisClient, supabaseAdmin, mongoDb } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { requireApiKey } from '../middleware/apiKey.js';
 
@@ -132,6 +132,52 @@ router.delete('/internal/ml-lock', requireApiKey, async (req, res) => {
     return res.status(200).json({ released: false, reason: 'owner_mismatch' });
   } catch (err) {
     logger.error(`[MLLock] Error releasing lock: ${err.message}`);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/internal/training-readiness
+ * Verifies if sufficient new production data (>= 100 completed orders) exists for ML retraining.
+ */
+router.get('/internal/training-readiness', requireApiKey, async (req, res) => {
+  try {
+    let completedOrderCount = 0;
+    if (supabaseAdmin) {
+      const { count, error } = await supabaseAdmin
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'completed');
+
+      if (!error && typeof count === 'number') {
+        completedOrderCount = count;
+      }
+    }
+
+    let telemetryCount = 0;
+    if (mongoDb) {
+      try {
+        telemetryCount = await mongoDb.collection('telemetry').countDocuments();
+      } catch (mErr) {
+        logger.warn(`[MLReadiness] Mongo count error: ${mErr.message}`);
+      }
+    }
+
+    const MIN_REQUIRED_ORDERS = 100;
+    const ready = completedOrderCount >= MIN_REQUIRED_ORDERS;
+
+    return res.status(200).json({
+      ready,
+      completedOrdersCount: completedOrderCount,
+      minOrdersRequired: MIN_REQUIRED_ORDERS,
+      telemetryRecordsCount: telemetryCount,
+      reason: ready ? null : 'insufficient_completed_orders',
+      message: ready
+        ? 'Sufficient completed orders accumulated for retraining.'
+        : `Insufficient completed orders (${completedOrderCount} < ${MIN_REQUIRED_ORDERS}). Retraining skipped.`,
+    });
+  } catch (err) {
+    logger.error(`[MLReadiness] Error checking training readiness: ${err.message}`);
     return res.status(500).json({ error: err.message });
   }
 });

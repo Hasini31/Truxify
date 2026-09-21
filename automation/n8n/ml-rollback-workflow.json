@@ -108,7 +108,24 @@
     },
     {
       "parameters": {
-        "toEmail": "ml-alerts@truxify.org",
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.rolled_back || ($node[\"Restore Previous Demand Model\"].json && $node[\"Restore Previous Demand Model\"].json.status === \"success\")}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1200, -100],
+      "id": "rollback-http-ok",
+      "name": "Check Rollback HTTP Status"
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ML_ALERT_EMAIL || 'ml-alerts@truxify.org'}}",
         "subject": "Demand Forecast Rollback: {{$node[\"Demand Rollback Decision\"].json.test_id}}",
         "htmlFormat": true,
         "message": "<h3>Demand Forecast Rollback</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Demand Rollback Decision\"].json.test_id}}</strong>.</p><p>Rollback result: {{$json.rolled_back}} at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p><p>The previous demand model remains active only when restoration succeeds.</p>",
@@ -116,9 +133,23 @@
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 1.1,
-      "position": [1200, -100],
+      "position": [1400, -200],
       "id": "send-alert",
       "name": "Send Demand Rollback Alert"
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ML_ALERT_EMAIL || 'ml-alerts@truxify.org'}}",
+        "subject": "CRITICAL: Demand Forecast Rollback Failed: {{$node[\"Demand Rollback Decision\"].json.test_id}}",
+        "htmlFormat": true,
+        "message": "<h3>Demand Forecast Rollback FAILED</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Demand Rollback Decision\"].json.test_id}}</strong>, but the rollback HTTP request failed.</p><p>Immediate manual intervention required.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [1400, 0],
+      "id": "send-failure-alert",
+      "name": "Send Demand Rollback Failure Alert"
     }
   ],
   "connections": {
@@ -181,7 +212,25 @@
       "main": [
         [
           {
+            "node": "rollback-http-ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rollback-http-ok": {
+      "main": [
+        [
+          {
             "node": "send-alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "send-failure-alert",
             "type": "main",
             "index": 0
           }

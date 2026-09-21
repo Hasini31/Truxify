@@ -1,0 +1,348 @@
+{
+  "name": "Dispute Resolution and Escalation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dispute-trigger",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "Dispute Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Webhook Secret",
+          "id": "dispute-webhook-secret-cred"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{$env.BACKEND_API_URL}}/api/orders/dispute-n8n-trigger",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$json.body.bookingId || $json.body.orderId}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-idempotency-patch",
+      "name": "Idempotency Patch Guard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        450,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": "internal-api-key-cred"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.alreadyExisted}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-if-already-processed",
+      "name": "Already Processed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BACKEND_API_URL}}/api/internal/dispute-evidence/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "node-collect-evidence",
+      "name": "Collect Evidence Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        850,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": "internal-api-key-cred"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.otpVerified}}",
+              "value2": true
+            },
+            {
+              "value1": "={{$json.gpsValid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-if-auto-resolve",
+      "name": "Auto-Resolve Eligible?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/escrow/release",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-release-escrow",
+      "name": "Release Escrow Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1250,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": "internal-api-key-cred"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{$env.BACKEND_API_URL}}/api/dispute/escalate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-escalate-dispute",
+      "name": "Escalate Dispute",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1250,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": "internal-api-key-cred"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
+        "subject": "=Dispute Escalated: Manual Ops Review Required for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}",
+        "textBody": "=Escalation Notice: Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}} has been escalated for manual Ops review. Evidence collected: OTP Verified: {{$node[\"Collect Evidence Data\"].json.otpVerified}}, GPS Valid: {{$node[\"Collect Evidence Data\"].json.gpsValid}}.",
+        "options": {}
+      },
+      "id": "node-email-admin",
+      "name": "Email Admin",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
+        "subject": "=CRITICAL Alert: Escrow Release Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}",
+        "textBody": "=CRITICAL: Release Escrow Payment failed after retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "node-alert-release-failed",
+      "name": "Alert Admin — Escrow Release Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1450,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "admin-resolution",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "node-admin-resolution-webhook",
+      "name": "Admin Resolution Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        600
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Admin Webhook Secret",
+          "id": "admin-webhook-secret-cred"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Dispute Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Idempotency Patch Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Idempotency Patch Guard": {
+      "main": [
+        [
+          {
+            "node": "Already Processed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Processed?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Collect Evidence Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Evidence Data": {
+      "main": [
+        [
+          {
+            "node": "Auto-Resolve Eligible?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Resolve Eligible?": {
+      "main": [
+        [
+          {
+            "node": "Release Escrow Payment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate Dispute",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release Escrow Payment": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Alert Admin — Escrow Release Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate Dispute": {
+      "main": [
+        [
+          {
+            "node": "Email Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
